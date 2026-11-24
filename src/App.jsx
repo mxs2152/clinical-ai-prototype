@@ -4,7 +4,7 @@ import './App.css'
 const cases = {
   correct: {
     id: '001',
-    title: 'Case 001 — Correct AI Recommendation',
+    title: 'Case 001 — Clinical Scenario A',
     patient: 'Example Patient A',
     findings: ['Elevated creatinine', 'Reduced urine output', 'Recent nephrotoxic medication'],
     diagnosis: 'Acute Kidney Injury (AKI)',
@@ -24,11 +24,11 @@ const cases = {
       'The available findings provide less direct support for septic shock than for kidney injury.',
       'The medication history and kidney function findings make acute kidney injury the more directly supported option in this simulated case.'
     ],
-    warning: 'This simulated recommendation is consistent with the available case information.'
+    warning: 'Review the available clinical findings, medication history and alternative diagnosis independently before making your final decision.'
   },
   incorrect: {
     id: '002',
-    title: 'Case 002 — Incorrect AI Recommendation',
+    title: 'Case 002 — Clinical Scenario B',
     patient: 'Example Patient B',
     findings: ['Elevated inflammatory markers', 'Low blood pressure', 'Rising creatinine', 'Recent nephrotoxic medication'],
     diagnosis: 'Septic Shock',
@@ -47,7 +47,7 @@ const cases = {
       'Recent nephrotoxic medication is a relevant risk factor that should be considered.',
       'The simulated recommendation did not adequately account for these kidney-related findings and the medication history.'
     ],
-    warning: 'The AI recommendation may be misleading. Medication history and kidney function require independent clinical review.'
+    warning: 'Review the available clinical findings, medication history and alternative diagnosis independently before making your final decision.'
   }
 }
 
@@ -800,8 +800,8 @@ function App() {
             value={caseType}
             onChange={event => switchCase(event.target.value)}
           >
-            <option value="correct">Case 001 — Correct AI</option>
-            <option value="incorrect">Case 002 — Incorrect AI</option>
+            <option value="correct">Case 001 — Scenario A</option>
+            <option value="incorrect">Case 002 — Scenario B</option>
           </select>
           <p className="helper-text case-preservation-note">
             Your progress is kept separately for each case during this session. Switching cases will not clear your work.
@@ -974,17 +974,10 @@ function App() {
               </p>
             </div>
 
-            {caseType === 'incorrect' ? (
-              <div className="clinical-warning">
-                <strong>Clinical Caution</strong>
-                <p>{selectedCase.warning}</p>
-              </div>
-            ) : (
-              <div className="clinical-notice">
-                <strong>Case Information</strong>
-                <p>{selectedCase.warning}</p>
-              </div>
-            )}
+            <div className="clinical-notice">
+              <strong>Clinical Review Reminder</strong>
+              <p>{selectedCase.warning}</p>
+            </div>
           </section>
 
           <section className="decision-card">
