@@ -549,24 +549,18 @@
   margin-top: 20px;
 }
 
-.accept-button {
-  color: #ffffff;
-  background: #347457;
-  border-color: #347457;
-}
-
-.accept-button:hover:not(:disabled) {
-  background: #286247;
-}
-
+.accept-button,
 .reject-button {
-  color: #8b4c3c;
+  flex: 1;
+  color: #40566e;
   background: #ffffff;
-  border-color: #d9b8ae;
+  border-color: #aebdcd;
 }
 
+.accept-button:hover:not(:disabled),
 .reject-button:hover:not(:disabled) {
-  background: #fbf3f1;
+  background: #f2f5f8;
+  border-color: #8297ad;
 }
 
 .decision-status {
