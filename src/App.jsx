@@ -904,7 +904,7 @@ function App() {
                 </div>
                 <div className="confidence-display">
                   <strong>{selectedCase.confidence}%</strong>
-                  <span>Simulated Confidence</span>
+                  <span>Illustrative Confidence</span>
                 </div>
               </div>
 
@@ -914,7 +914,7 @@ function App() {
                   <strong>Simulated AI Output</strong>
                 </div>
                 <p>
-                  This prototype uses predefined case recommendations and explanations. It does not connect to a live AI model or provide clinical advice.
+                  This prototype uses predefined case recommendations and explanations. It does not connect to a live AI model or provide clinical advice. The confidence score is predefined for demonstration purposes and does not represent a calculated probability.
                 </p>
               </div>
             </div>
