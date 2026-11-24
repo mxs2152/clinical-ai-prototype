@@ -1,4 +1,3 @@
-
 import { useState } from 'react'
 import './App.css'
 
@@ -535,7 +534,11 @@ function App() {
   }
 
   function editFinalDiagnosis() {
-    if (work.rationaleEditing || work.finalDiagnosisEditing) return
+    if (
+      work.decision !== 'Rejected' ||
+      work.rationaleEditing ||
+      work.finalDiagnosisEditing
+    ) return
 
     updateCurrentCase({
       finalDiagnosisDraft: work.finalDiagnosis,
@@ -1099,14 +1102,23 @@ function App() {
                     <p className="confirmed-message">
                       <span>✓</span> {work.finalDiagnosis}
                     </p>
-                    <button
-                      type="button"
-                      className="secondary-button edit-button"
-                      onClick={editFinalDiagnosis}
-                      disabled={work.rationaleEditing}
-                    >
-                      Edit Final Diagnosis
-                    </button>
+                    {work.decision === 'Rejected' ? (
+                      <button
+                        type="button"
+                        className="secondary-button edit-button"
+                        onClick={editFinalDiagnosis}
+                        disabled={work.rationaleEditing}
+                      >
+                        Edit Final Diagnosis
+                      </button>
+                    ) : (
+                      <p className="helper-text">
+                        Your final diagnosis reflects the accepted AI recommendation.
+                        To select a different diagnosis, choose Reject Recommendation
+                        before completing your decision, or use Change My Decision
+                        after completing it.
+                      </p>
+                    )}
                   </>
                 )}
               </div>
