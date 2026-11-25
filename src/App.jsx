@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 
 const cases = {
@@ -24,7 +24,7 @@ const cases = {
       'The available findings provide less direct support for septic shock than for kidney injury.',
       'The medication history and kidney function findings make acute kidney injury the more directly supported option in this simulated case.'
     ],
-    warning: 'Review the available clinical findings, medication history and alternative diagnosis independently before making your final decision.'
+    warning: 'Review the available clinical findings, medication history and possible diagnoses independently before making your final decision.'
   },
   incorrect: {
     id: '002',
@@ -40,14 +40,14 @@ const cases = {
       'Low blood pressure contributed to the septic shock recommendation.'
     ],
     contrastiveExplanation: [
-      'The recommendation gives substantial weight to infection-related indicators, but this does not resolve the kidney-related evidence.'
+      'The simulated recommendation focuses on infection-related indicators, while kidney-related findings remain relevant to the clinical assessment.'
     ],
     alternativeExplanation: [
       'Rising creatinine is an important indicator of possible kidney injury.',
       'Recent nephrotoxic medication is a relevant risk factor that should be considered.',
-      'The simulated recommendation did not adequately account for these kidney-related findings and the medication history.'
+      'These kidney-related findings and the medication history provide evidence that should be considered alongside the infection-related indicators.'
     ],
-    warning: 'Review the available clinical findings, medication history and alternative diagnosis independently before making your final decision.'
+    warning: 'Review the available clinical findings, medication history and possible diagnoses independently before making your final decision.'
   }
 }
 
@@ -83,6 +83,8 @@ const diagnosisSuggestions = {
   'drug induced acute kidney': 'Drug-Induced Acute Kidney Injury',
   'drug induced kidney': 'Drug-Induced Acute Kidney Injury',
   'drug induced kidney injury': 'Drug-Induced Acute Kidney Injury',
+  'drug induced acure kidney injury': 'Drug-Induced Acute Kidney Injury',
+  'acute kidney injuryy': 'Acute Kidney Injury (AKI)',
   'drug induced acute kideny injury': 'Drug-Induced Acute Kidney Injury',
   'drug induced acute kidney injry': 'Drug-Induced Acute Kidney Injury',
   'drug induced acute kidney injur': 'Drug-Induced Acute Kidney Injury',
@@ -167,6 +169,10 @@ function findDiagnosisSuggestion(value) {
   return suggestion
 }
 
+function containsDiagnosisLetter(value) {
+  return /\p{L}/u.test(value)
+}
+
 function isIncompleteDiagnosis(value) {
   const cleaned = normaliseDiagnosis(value)
   return cleaned.length < 3 || incompleteDiagnosisEntries.includes(cleaned)
@@ -180,10 +186,94 @@ function App() {
   })
   const [confirmationAction, setConfirmationAction] = useState('')
   const [summaryOpen, setSummaryOpen] = useState(false)
+  const pendingScroll = useRef(null)
+  const modalRef = useRef(null)
+  const appRef = useRef(null)
+  const modalOpen = Boolean(confirmationAction)
+
+  useEffect(() => {
+    if (!modalOpen) return
+
+    const previousFocus = document.activeElement
+    const modal = modalRef.current
+    const app = appRef.current
+    if (!modal) return
+
+    function getButtons() {
+      return Array.from(modal.querySelectorAll('button:not(:disabled)'))
+    }
+
+    getButtons()[0]?.focus()
+
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setConfirmationAction('')
+        return
+      }
+
+      if (event.key !== 'Tab') return
+
+      const buttons = getButtons()
+      if (!buttons.length) return
+
+      event.preventDefault()
+      const currentIndex = buttons.indexOf(document.activeElement)
+      const nextIndex = currentIndex === -1
+        ? (event.shiftKey ? buttons.length - 1 : 0)
+        : (currentIndex + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length
+
+      buttons[nextIndex].focus()
+    }
+
+    document.addEventListener('keydown', handleKeyDown, true)
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true)
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected && !previousFocus.matches(':disabled')) {
+        previousFocus.focus()
+      } else {
+        app?.focus()
+      }
+    }
+  }, [modalOpen])
+
+  useEffect(() => {
+    if (confirmationAction) {
+      modalRef.current?.querySelector('button:not(:disabled)')?.focus()
+    }
+  }, [confirmationAction])
+
 
   const selectedCase = cases[caseType]
   const work = caseWork[caseType]
   const currentAttemptNumber = work.attempts.length + 1
+  const completedSteps = !work.initialConfirmed ? 0
+    : !work.decision ? 1
+    : !work.finalDiagnosisConfirmed || work.finalDiagnosisEditing ? 2
+    : !work.reasonConfirmed || work.rationaleEditing ? 3
+    : 4
+
+  const stepAvailable = [true, work.showAI, work.showAI, Boolean(work.decision && work.finalDiagnosisConfirmed && !work.finalDiagnosisEditing)]
+
+  function navigateToStep(index) {
+    const target = document.getElementById(`workflow-step-${index + 1}`)
+    if (!target) return
+    const offset = 20
+    target.focus({ preventScroll: true })
+    window.scrollTo({
+      top: Math.max(0, window.scrollY + target.getBoundingClientRect().top - offset),
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'
+    })
+  }
+
+  useEffect(() => {
+    if (modalOpen || pendingScroll.current === null) return
+    const index = pendingScroll.current
+    pendingScroll.current = null
+    const frame = requestAnimationFrame(() => navigateToStep(index))
+    return () => cancelAnimationFrame(frame)
+  }, [modalOpen, completedSteps, caseType])
 
   const diagnosisDraftUnchanged =
     normaliseDiagnosis(work.finalDiagnosisDraft) ===
@@ -200,6 +290,7 @@ function App() {
   }
 
   function switchCase(nextCase) {
+    pendingScroll.current = null
     setCaseType(nextCase)
     setSummaryOpen(false)
     setConfirmationAction('')
@@ -233,6 +324,11 @@ function App() {
 
     if (!diagnosis) {
       updateCurrentCase({ initialError: 'Please enter your initial diagnosis.' })
+      return
+    }
+
+    if (!containsDiagnosisLetter(diagnosis)) {
+      updateCurrentCase({ initialError: 'Please enter a diagnosis containing at least one letter, not just numbers or symbols.' })
       return
     }
 
@@ -312,6 +408,11 @@ function App() {
   }
 
   function confirmAction() {
+    if (confirmationAction === 'confirm-initial') pendingScroll.current = 1
+    if (['accept', 'change-to-accept', 'repeat-accept'].includes(confirmationAction)) pendingScroll.current = 3
+    if (['reject', 'change-to-reject', 'repeat-reject'].includes(confirmationAction)) pendingScroll.current = 2
+    if (confirmationAction === 'confirm-final') pendingScroll.current = 3
+    if (confirmationAction === 'reopen' && work.reasonConfirmed) pendingScroll.current = 1
     if (confirmationAction === 'confirm-initial') {
       updateCurrentCase({
         initialConfirmed: true,
@@ -373,7 +474,7 @@ function App() {
     }
 
     if (confirmationAction === 'confirm-rationale') {
-      if (!work.decisionReasonDraft.trim() || !work.finalDiagnosisConfirmed) {
+      if (!work.decisionReasonDraft.trim() || !work.finalDiagnosisConfirmed || work.finalDiagnosisEditing) {
         setConfirmationAction('')
         return
       }
@@ -494,6 +595,11 @@ function App() {
       return ''
     }
 
+    if (!containsDiagnosisLetter(diagnosis)) {
+      updateCurrentCase({ finalError: 'Please enter a diagnosis containing at least one letter, not just numbers or symbols.' })
+      return ''
+    }
+
     if (isIncompleteDiagnosis(diagnosis)) {
       updateCurrentCase({
         finalError: 'This entry appears incomplete. Please enter a complete diagnosis.'
@@ -602,7 +708,7 @@ function App() {
   }
 
   function requestRationaleConfirmation() {
-    if (!work.decisionReasonDraft.trim() || !work.finalDiagnosisConfirmed) return
+    if (!work.decisionReasonDraft.trim() || !work.finalDiagnosisConfirmed || work.finalDiagnosisEditing) return
     setConfirmationAction('confirm-rationale')
   }
 
@@ -610,7 +716,7 @@ function App() {
     if (
       !work.reasonConfirmed ||
       work.rationaleEditing ||
-      (work.finalDiagnosisEditing && !diagnosisDraftUnchanged)
+      work.finalDiagnosisEditing
     ) return
 
     updateCurrentCase({
@@ -642,25 +748,20 @@ function App() {
     normaliseDiagnosis(resolveDiagnosis(work.initialDiagnosis)) ===
     normaliseDiagnosis(selectedCase.diagnosis)
 
-  const currentAttempt = work.reasonConfirmed
+  const hasContrastiveExplanation = !comparisonMatches &&
+    normaliseDiagnosis(resolveDiagnosis(work.initialDiagnosis)) ===
+    normaliseDiagnosis(selectedCase.alternative)
+
+  const currentAttempt = work.reasonConfirmed && !work.finalDiagnosisEditing && !work.rationaleEditing
     ? createAttemptSnapshot()
     : null
-
-  const completedAttempts = currentAttempt
-    ? [...work.attempts, currentAttempt]
-    : work.attempts
-
-  const latestCompletedAttempt =
-    completedAttempts.length > 0
-      ? completedAttempts[completedAttempts.length - 1]
-      : null
 
   const previousAttempts = work.attempts
 
   const modalContent = {
     'confirm-initial': {
       title: 'Confirm Initial Diagnosis',
-      message: `You entered "${work.initialDiagnosis}". Are you sure you want to use this as your initial diagnosis?`,
+      message: `You entered "${work.initialDiagnosis}". Once confirmed, your initial diagnosis will be locked and the AI recommendation will be revealed. Are you sure you want to continue?`,
       confirm: 'Confirm Diagnosis'
     },
     'confirm-final': {
@@ -670,7 +771,7 @@ function App() {
     },
     'confirm-final-edit': {
       title: 'Update Final Diagnosis and Rationale',
-      message: `You are changing your final diagnosis to "${work.finalDiagnosisDraft}". Your previous completed decision, including its rationale, will be saved in Previous Attempts. The previous rationale cannot be reused for the new diagnosis. You MUST provide and confirm a new decision rationale before your updated decision can be completed. Do you want to continue?`,
+      message: `You are changing your final diagnosis to "${work.finalDiagnosisDraft}". ${work.reasonConfirmed ? "Your previous completed decision, including its rationale, will be saved in Previous Attempts. " : ""}Any existing rationale draft will be cleared. You must provide and confirm a new decision rationale before your updated decision can be completed. Do you want to continue?`,
       confirm: 'Update Diagnosis'
     },
     'rejected-ai-match': {
@@ -746,6 +847,7 @@ function App() {
     }
 
     if (confirmationAction === 'confirm-final-edit') {
+      pendingScroll.current = 3
       const updatedAttempts = work.reasonConfirmed
         ? [...work.attempts, createAttemptSnapshot()]
         : work.attempts
@@ -773,127 +875,179 @@ function App() {
   }
 
   return (
-    <main className="app-container">
+    <main className="app-container" ref={appRef} tabIndex={-1}>
       <header className="app-header">
-        <div>
-          <p className="eyebrow">Human-Centred Clinical Decision Support</p>
-          <h1>ClinicianAI</h1>
-          <p className="app-subtitle">
-            Explore an AI recommendation, evaluate the available evidence, and make your own clinical decision.
-          </p>
+        <div className="app-header-top">
+          <div>
+            <p className="eyebrow">Human-Centred Clinical Decision Support</p>
+            <h1>ClinicianAI</h1>
+          </div>
+        <button
+          type="button"
+          className="secondary-button new-case-button"
+          onClick={requestNewCase}
+        >
+          Start New Case
+        </button>
         </div>
+        <p className="app-subtitle">
+            Explore an AI recommendation, evaluate the available evidence, and make your own clinical decision.
+        </p>
       </header>
 
-      <section className="case-card">
-        <div className="section-heading">
-          <div>
-            <p className="step-label">CASE OVERVIEW</p>
-            <h2>{selectedCase.title}</h2>
-          </div>
-          <span className="case-id">Case {selectedCase.id}</span>
+      <section className="decision-progress" aria-label="Decision progress">
+        <div className="progress-heading">
+          <strong>Decision Progress</strong>
+          <span role="status">{completedSteps} of 4 steps completed</span>
         </div>
-
-        <div className="case-selector">
-          <label htmlFor="case-select">Select Clinical Scenario</label>
-          <select
-            id="case-select"
-            value={caseType}
-            onChange={event => switchCase(event.target.value)}
-          >
-            <option value="correct">Case 001 — Scenario A</option>
-            <option value="incorrect">Case 002 — Scenario B</option>
-          </select>
-          <p className="helper-text case-preservation-note">
-            Your progress is kept separately for each case during this session. Switching cases will not clear your work.
-          </p>
-        </div>
-
-        <div className="patient-details">
-          <span className="detail-label">Patient</span>
-          <strong>{selectedCase.patient}</strong>
-        </div>
-
-        <div className="findings-section">
-          <h3>Clinical Findings</h3>
-          <ul className="findings-list">
-            {selectedCase.findings.map(finding => (
-              <li key={finding}>{finding}</li>
-            ))}
-          </ul>
+        <div className="progress-track" aria-hidden="true"><div className="progress-fill" style={{ width: `${completedSteps * 25}%` }} /></div>
+        <div className="progress-steps">
+          {['Initial Diagnosis', 'Evaluate AI', 'Final Decision', 'Rationale'].map((label, index) => (
+            <button
+              type="button"
+              key={label}
+              disabled={!stepAvailable[index]}
+              onClick={() => navigateToStep(index)}
+              aria-label={`${label}: ${index < completedSteps ? 'Completed' : index === completedSteps ? 'In progress' : 'Pending'}. Go to section`}
+              className={`progress-step ${index < completedSteps ? 'is-complete' : index === completedSteps ? 'is-current' : 'is-pending'}`}
+              aria-current={index === completedSteps ? 'step' : undefined}
+            >
+              <span className="progress-number" aria-hidden="true">{index < completedSteps ? '✓' : index + 1}</span>
+              <span>{label}</span>
+              <span className="progress-state">{index < completedSteps ? 'Completed' : index === completedSteps ? 'In progress' : 'Pending'}</span>
+            </button>
+          ))}
         </div>
       </section>
 
-      <section className="decision-card">
-        <div className="section-heading">
-          <div>
-            <p className="step-label">STEP 1</p>
-            <h2>Enter Your Initial Diagnosis</h2>
-          </div>
-        </div>
-
-        <p className="section-description">
-          Record your initial assessment before viewing the AI recommendation.
-        </p>
-
-        {!work.initialConfirmed ? (
-          <>
-            <label htmlFor="initial-diagnosis">Your Initial Diagnosis</label>
-            <input
-              id="initial-diagnosis"
-              type="text"
-              value={work.initialDiagnosis}
-              onChange={event => updateInitialDiagnosis(event.target.value)}
-              placeholder="Enter your diagnosis..."
-            />
-
-            {work.initialSuggestion && (
-              <div className="suggestion-panel">
-                <p className="suggestion-title">Did you mean?</p>
-                <p><strong>Your entry:</strong> {work.initialDiagnosis}</p>
-                <p><strong>Suggested diagnosis:</strong> {work.initialSuggestion}</p>
-                <div className="suggestion-actions">
-                  <button type="button" className="primary-button small-button" onClick={acceptInitialSuggestion}>
-                    Yes, Use This
-                  </button>
-                  <button type="button" className="secondary-button small-button" onClick={dismissInitialSuggestion}>
-                    No, Keep My Entry
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {work.initialError && <p className="error-message">{work.initialError}</p>}
-
-            <p className="helper-text">
-              You can enter a diagnosis in your own words. The prototype checks for blank or obviously incomplete entries, but does not verify clinical validity.
-            </p>
-
-            <div className="form-actions">
-              <button
-                type="button"
-                className="primary-button"
-                onClick={submitInitialDiagnosis}
-                disabled={!work.initialDiagnosis.trim() || Boolean(work.initialSuggestion)}
-              >
-                Submit Initial Diagnosis
-              </button>
+      <div className="initial-workspace">
+        <section className="case-card">
+          <div className="section-heading">
+            <div>
+              <p className="step-label">CASE OVERVIEW</p>
+              <h2>{selectedCase.title}</h2>
             </div>
-          </>
-        ) : (
-          <p className="locked-entry">
-            <strong>Your initial diagnosis:</strong> {work.initialDiagnosis}
+          </div>
+
+          <div className="case-selector">
+            <label htmlFor="case-select">Select Clinical Scenario</label>
+            <select
+              id="case-select"
+              value={caseType}
+              onChange={event => switchCase(event.target.value)}
+            >
+              <option value="correct">Case 001 — Scenario A</option>
+              <option value="incorrect">Case 002 — Scenario B</option>
+            </select>
+            <p className="helper-text case-preservation-note">
+              Your progress is kept separately for each case during this session. Switching cases will not clear your work.
+            </p>
+          </div>
+
+          <div className="patient-details">
+            <span className="detail-label">Patient</span>
+            <strong>{selectedCase.patient}</strong>
+          </div>
+
+          <div className="findings-section">
+            <h3>Clinical Findings</h3>
+            <ul className="findings-list">
+              {selectedCase.findings.map(finding => (
+                <li key={finding}>{finding}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        <section className="decision-card workflow-target" id="workflow-step-1" tabIndex={-1}>
+          <div className="section-heading">
+            <div>
+            
+              <h2>Enter Your Initial Diagnosis</h2>
+            </div>
+              <div className="workflow-status">
+                <span className="workflow-step-label">STEP 1 OF 4</span>
+                <span className="workflow-state"><span aria-hidden="true">{completedSteps >= 1 ? '✓' : completedSteps === 0 ? '◉' : '○'}</span> {completedSteps >= 1 ? 'Completed' : completedSteps === 0 ? 'In progress' : 'Pending'}</span>
+              </div>
+          </div>
+
+          <p className="section-description">
+            Record your initial assessment before viewing the AI recommendation.
           </p>
-        )}
-      </section>
+
+          {!work.initialConfirmed ? (
+            <>
+              <label htmlFor="initial-diagnosis">Your Initial Diagnosis</label>
+              <input
+                id="initial-diagnosis"
+                type="text"
+                value={work.initialDiagnosis}
+                onChange={event => updateInitialDiagnosis(event.target.value)}
+                placeholder="Enter your diagnosis..."
+              />
+
+              {work.initialSuggestion && (
+                <div className="suggestion-panel">
+                  <p className="suggestion-title">Did you mean?</p>
+                  <p><strong>Your entry:</strong> {work.initialDiagnosis}</p>
+                  <p><strong>Suggested diagnosis:</strong> {work.initialSuggestion}</p>
+                  <div className="suggestion-actions">
+                    <button type="button" className="primary-button small-button" onClick={acceptInitialSuggestion}>
+                      Yes, Use This
+                    </button>
+                    <button type="button" className="secondary-button small-button" onClick={dismissInitialSuggestion}>
+                      No, Keep My Entry
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {work.initialError && <p className="error-message" role="alert">{work.initialError}</p>}
+
+              <p className="helper-text">
+                You can enter a diagnosis in your own words. The prototype checks for blank, obviously incomplete or letter-free entries, but does not verify clinical validity.
+              </p>
+
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={submitInitialDiagnosis}
+                  disabled={!work.initialDiagnosis.trim() || Boolean(work.initialSuggestion)}
+                >
+                  Submit Initial Diagnosis
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="locked-entry initial-locked-entry">
+              <div className="initial-lock-heading">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                  <rect x="5" y="10" width="14" height="11" rx="2" />
+                  <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+                  <path d="M12 14v3" />
+                </svg>
+                <span>Initial Diagnosis Locked</span>
+              </div>
+              <p className="initial-locked-value"><strong>Your initial diagnosis:</strong> {work.initialDiagnosis}</p>
+              <p className="initial-lock-note">Your initial diagnosis is locked to preserve your independent assessment before viewing the AI recommendation. You can still revise your clinical judgement through your final decision.</p>
+            </div>
+          )}
+        </section>
+      </div>
 
       {work.showAI && (
         <>
-          <section className="decision-card">
+          <section className="decision-card workflow-target" id="workflow-step-2" tabIndex={-1}>
             <div className="section-heading">
               <div>
-                <p className="step-label">STEP 2</p>
+                
                 <h2>Evaluate the AI Recommendation</h2>
               </div>
+            <div className="workflow-status">
+              <span className="workflow-step-label">STEP 2 OF 4</span>
+              <span className="workflow-state"><span aria-hidden="true">{completedSteps >= 2 ? '✓' : completedSteps === 1 ? '◉' : '○'}</span> {completedSteps >= 2 ? 'Completed' : completedSteps === 1 ? 'In progress' : 'Pending'}</span>
+            </div>
             </div>
 
             <div className="recommendation-panel">
@@ -921,53 +1075,62 @@ function App() {
 
             <div className="comparison-section">
               <h3>Initial Diagnosis Comparison</h3>
-              <div className="comparison-layout">
+              <div className={`comparison-result ${comparisonMatches ? 'match' : 'different'}`}>
+                <div>
+                  <strong>{comparisonMatches ? 'DIAGNOSES MATCH' : 'DIAGNOSES DIFFER'}</strong>
+                  <p>{comparisonMatches ? 'Your initial diagnosis matches the AI recommendation.' : 'Your initial diagnosis differs from the AI recommendation.'}</p>
+                </div>
+              </div>
+              <div className={`comparison-layout ${comparisonMatches ? 'match' : 'different'}`}>
                 <div className="comparison-column">
                   <span className="detail-label">YOUR INITIAL DIAGNOSIS</span>
                   <strong>{work.initialDiagnosis}</strong>
                 </div>
-                <div className={`comparison-result ${comparisonMatches ? 'match' : 'different'}`}>
-                  <span className="comparison-symbol">{comparisonMatches ? '=' : '≠'}</span>
-                  <strong>{comparisonMatches ? 'MATCH' : 'DIFFERENT'}</strong>
-                  <span>{comparisonMatches ? 'Matching diagnosis' : 'Different diagnosis'}</span>
-                </div>
+                <span className="comparison-symbol" aria-hidden="true">{comparisonMatches ? '=' : '≠'}</span>
                 <div className="comparison-column">
                   <span className="detail-label">AI RECOMMENDATION</span>
                   <strong>{selectedCase.diagnosis}</strong>
                 </div>
               </div>
               <p className="helper-text">
-                This comparison checks whether the diagnoses match based on their wording. It does not indicate clinical correctness.
+                This comparison uses wording and predefined aliases. Neither agreement nor disagreement establishes clinical correctness.
               </p>
             </div>
 
             <div className="contrastive-section">
-              <h3>
-                Contrastive Explanation — Why this diagnosis rather than {selectedCase.alternative}?
-              </h3>
+              <h3>{hasContrastiveExplanation ? 'Contrastive Explanation' : 'Recommendation Explanation'}</h3>
               <p className="section-description">
-                Compare the findings supporting the AI recommendation with those that may support the alternative diagnosis.
+                {hasContrastiveExplanation
+                  ? `Why ${selectedCase.diagnosis} rather than your initial diagnosis, ${work.initialDiagnosis}?`
+                  : `Review the predefined findings behind the recommendation of ${selectedCase.diagnosis}.`}
               </p>
-              <div className="contrastive-columns">
+              {!comparisonMatches && !hasContrastiveExplanation && (
+                <p className="explanation-availability">
+                  No predefined contrastive explanation is available for your initial diagnosis ({work.initialDiagnosis}). The explanation below describes only the simulated recommendation.
+                </p>
+              )}
+              <div className={`contrastive-columns${hasContrastiveExplanation ? '' : ' single-explanation'}`}>
                 <div className="contrastive-column">
                   <h4>Why the AI recommends {selectedCase.diagnosis}</h4>
                   <ul>
                     {selectedCase.explanation.map((item, index) => (
                       <li key={`explanation-${index}`}>{item}</li>
                     ))}
-                    {selectedCase.contrastiveExplanation.map((item, index) => (
+                    {hasContrastiveExplanation && selectedCase.contrastiveExplanation.map((item, index) => (
                       <li key={`support-${index}`}>{item}</li>
                     ))}
                   </ul>
                 </div>
-                <div className="contrastive-column alternative-column">
-                  <h4>Why not {selectedCase.alternative}?</h4>
-                  <ul>
-                    {selectedCase.alternativeExplanation.map((item, index) => (
-                      <li key={`alternative-${index}`}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
+                {hasContrastiveExplanation && (
+                  <div className="contrastive-column alternative-column">
+                    <h4>Evidence concerning your initial diagnosis: {work.initialDiagnosis}</h4>
+                    <ul>
+                      {selectedCase.alternativeExplanation.map((item, index) => (
+                        <li key={`alternative-${index}`}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
               <p className="explanation-disclaimer">
                 These are predefined explanations written for the simulated case. They do not represent the internal reasoning of a live AI model.
@@ -980,12 +1143,16 @@ function App() {
             </div>
           </section>
 
-          <section className="decision-card">
+          <section className="decision-card workflow-target" id="workflow-step-3" tabIndex={-1}>
             <div className="section-heading">
               <div>
-                <p className="step-label">STEP 3</p>
+                
                 <h2>Make Your Decision</h2>
               </div>
+            <div className="workflow-status">
+              <span className="workflow-step-label">STEP 3 OF 4</span>
+              <span className="workflow-state"><span aria-hidden="true">{completedSteps >= 3 ? '✓' : completedSteps === 2 ? '◉' : '○'}</span> {completedSteps >= 3 ? 'Completed' : completedSteps === 2 ? 'In progress' : 'Pending'}</span>
+            </div>
             </div>
 
             <p className="section-description">
@@ -1054,10 +1221,10 @@ function App() {
                       </div>
                     )}
 
-                    {work.finalError && <p className="error-message">{work.finalError}</p>}
+                    {work.finalError && <p className="error-message" role="alert">{work.finalError}</p>}
 
                     <p className="helper-text">
-                      You can enter a diagnosis in your own words. The prototype checks for blank or obviously incomplete entries, but does not verify clinical validity.
+                      You can enter a diagnosis in your own words. The prototype checks for blank, obviously incomplete or letter-free entries, but does not verify clinical validity.
                     </p>
 
                     <div className="form-actions">
@@ -1118,15 +1285,23 @@ function App() {
             )}
 
             {work.decision && work.finalDiagnosisConfirmed && (
-              <div className="rationale-section">
-                <h3>Decision Rationale</h3>
+              <div className="rationale-section workflow-target" id="workflow-step-4" tabIndex={-1}>
+                <div className="section-heading">
+                  <div><h3>Decision Rationale</h3></div>
+                  <div className="workflow-status">
+              <span className="workflow-step-label">STEP 4 OF 4</span>
+              <span className="workflow-state"><span aria-hidden="true">{completedSteps >= 4 ? '✓' : completedSteps === 3 ? '◉' : '○'}</span> {completedSteps >= 4 ? 'Completed' : completedSteps === 3 ? 'In progress' : 'Pending'}</span>
+            </div>
+                </div>
                 <p className="section-description">
                   Explain why you accepted or rejected the recommendation, referring to the case information where appropriate.
                 </p>
 
-                {work.finalDiagnosisEditing && !diagnosisDraftUnchanged ? (
+                {work.finalDiagnosisEditing ? (
                   <div className="rationale-link-notice">
-                    Your current rationale is linked to "{work.finalDiagnosis}". Save the changed final diagnosis to provide a new rationale for it.
+                    {work.reasonConfirmed
+                      ? `Your confirmed rationale is linked to "${work.finalDiagnosis}". Finish or cancel editing your final diagnosis before editing the rationale.`
+                      : "Finish or cancel editing your final diagnosis before confirming a rationale."}
                   </div>
                 ) : work.reasonConfirmed && !work.rationaleEditing ? (
                   <>
@@ -1138,7 +1313,7 @@ function App() {
                       type="button"
                       className="secondary-button edit-button"
                       onClick={editDecisionRationale}
-                      disabled={work.finalDiagnosisEditing && !diagnosisDraftUnchanged}
+                      disabled={work.finalDiagnosisEditing}
                     >
                       Edit Decision Rationale
                     </button>
@@ -1195,16 +1370,16 @@ function App() {
         </>
       )}
 
-      {latestCompletedAttempt && (
+      {currentAttempt && (
         <section className="final-decision-card">
           <div className="final-decision-heading">
             <div>
               <p className="step-label">
-                {work.reasonConfirmed ? 'FINAL DECISION' : 'LAST COMPLETED DECISION'}
+                FINAL DECISION
               </p>
               <h2>Decision Summary</h2>
               <p className="attempt-reference">
-                Attempt {latestCompletedAttempt.attemptNumber}
+                Attempt {currentAttempt.attemptNumber}
               </p>
             </div>
             <span className="completed-label">Completed</span>
@@ -1213,26 +1388,26 @@ function App() {
           <div className="final-decision-details">
             <div>
               <span className="detail-label">FINAL DIAGNOSIS</span>
-              <strong>{latestCompletedAttempt.diagnosis}</strong>
+              <strong>{currentAttempt.diagnosis}</strong>
             </div>
 
             <div className="final-rationale">
               <span className="detail-label">DECISION RATIONALE</span>
-              <p>{latestCompletedAttempt.rationale}</p>
+              <p>{currentAttempt.rationale}</p>
             </div>
 
             <div>
               <span className="detail-label">INITIAL DIAGNOSIS</span>
-              <strong>{latestCompletedAttempt.initialDiagnosis}</strong>
+              <strong>{currentAttempt.initialDiagnosis}</strong>
             </div>
 
             <div>
               <span className="detail-label">AI RECOMMENDATION</span>
-              <strong>{latestCompletedAttempt.aiRecommendation}</strong>
-              <span className={`decision-outcome ${latestCompletedAttempt.decision === 'Accepted' ? 'accepted' : 'rejected'}`}>
-                {latestCompletedAttempt.decision}
+              <strong>{currentAttempt.aiRecommendation}</strong>
+              <span className={`decision-outcome ${currentAttempt.decision === 'Accepted' ? 'accepted' : 'rejected'}`}>
+                {currentAttempt.decision}
               </span>
-              <p className="ai-summary">{latestCompletedAttempt.aiSummary}</p>
+              <p className="ai-summary">{currentAttempt.aiSummary}</p>
             </div>
           </div>
         </section>
@@ -1295,19 +1470,13 @@ function App() {
         >
           Change My Decision
         </button>
-        <button
-          type="button"
-          className="secondary-button new-case-button"
-          onClick={requestNewCase}
-        >
-          Start New Case
-        </button>
       </div>
 
       {confirmationAction && modalContent[confirmationAction] && (
         <div className="modal-overlay">
           <section
             className="confirmation-modal"
+            ref={modalRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="modal-title"
@@ -1326,7 +1495,9 @@ function App() {
                   ? 'Close'
                   : confirmationAction === 'rejected-ai-match'
                     ? 'Go Back'
-                    : 'Cancel'}
+                    : ['confirm-final-edit', 'confirm-rationale-edit'].includes(confirmationAction)
+                      ? 'Back to Editing'
+                      : 'Cancel'}
               </button>
               <button
                 type="button"
